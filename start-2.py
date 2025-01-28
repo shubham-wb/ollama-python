@@ -31,3 +31,4 @@ res  = ollama.chat(
 
 for chunk in res: 
     print(chunk["message"]["content"],end="",flush=True)
+
