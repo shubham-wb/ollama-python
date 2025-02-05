@@ -1,29 +1,53 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
 import ollama
-import asyncio
+import json
 
 app = FastAPI()
 
-async def ollama_stream_response(html_content, user_prompt):
-    """Streams response from Llama AI model"""
-    prompt = f"""
-    {user_prompt}
+async def get_llama_response(html_content, user_prompt):
+    """Ensures Llama returns only valid JSON"""
+    full_prompt = f"""
+    Extract the required information from the provided HTML and return ONLY a JSON object.
+    DO NOT include any explanations, comments, or extra text—only return the JSON.
+
+    Your output must strictly be in this format:
+    {{
+        "username_selector": "CSS selector for username field",
+        "password_selector": "CSS selector for password field",
+        "login_selector": "CSS selector for login button"
+    }}
+
+    Example HTML:
+    ```html
+    <form>
+        <input type='text' id='user'>
+        <input type='password' id='pass'>
+        <button id='login-btn'>Login</button>
+    </form>
+    ```
     
-    Here is the HTML:
+    Expected JSON Output:
+    {{
+        "username_selector": "#user",
+        "password_selector": "#pass",
+        "login_selector": "#login-btn"
+    }}
+
+    Now, process the following HTML and return only the JSON:
+
     ```html
     {html_content}
     ```
     """
 
-    stream = ollama.chat(model="llama3", messages=[{"role": "user", "content": prompt}], stream=True)
+    response = ollama.chat(model="llama3.2", messages=[{"role": "user", "content": full_prompt}])
 
-    async def event_generator():
-        for chunk in stream:
-            if "message" in chunk:
-                yield chunk["message"]["content"]
-
-    return StreamingResponse(event_generator(), media_type="application/json")
+    try:
+        json_object = json.loads(response["message"]["content"])  # Validate JSON
+        return JSONResponse(content=json_object)  # Return as JSON response
+    except (json.JSONDecodeError, KeyError):
+        return JSONResponse(content={"error": "Invalid response from Llama"}, status_code=500)
 
 @app.post("/extract")
 async def extract_json(request: Request):
@@ -32,7 +56,7 @@ async def extract_json(request: Request):
     html_content = data.get("html", "")
     user_prompt = data.get("prompt", "")
 
-    return await ollama_stream_response(html_content, user_prompt)
+    return await get_llama_response(html_content, user_prompt)
 
 if __name__ == "__main__":
     import uvicorn
