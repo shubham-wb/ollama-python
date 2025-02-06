@@ -2,61 +2,60 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import ollama
 import json
-
+import re
 app = FastAPI()
 
-async def get_llama_response(html_content, user_prompt):
+async def get_llama_response(html_content, user_prompt, extra_content=None):
     """Ensures Llama returns only valid JSON"""
-    full_prompt = f"""
-    Extract the required information from the provided HTML and return ONLY a JSON object.
-    DO NOT include any explanations, comments, or extra text—only return the JSON.
-
-    Your output must strictly be in this format:
-    {{
-        "username_selector": "CSS selector for username field",
-        "password_selector": "CSS selector for password field",
-        "login_selector": "CSS selector for login button"
-    }}
-
-    Example HTML:
-    ```html
-    <form>
-        <input type='text' id='user'>
-        <input type='password' id='pass'>
-        <button id='login-btn'>Login</button>
-    </form>
-    ```
     
-    Expected JSON Output:
-    {{
-        "username_selector": "#user",
-        "password_selector": "#pass",
-        "login_selector": "#login-btn"
-    }}
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a web scraper helper that extracts data from HTML or text. "
+                "You will be given a piece of text or HTML content as input and also a prompt specifying what data to extract. "
+                "Your response must be only the extracted data as a valid JSON object or array, with no extra words or explanations. "
+                "If no data is found, return an empty JSON array []. "
+                "Analyze the input carefully and extract data precisely based on the prompt."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Here is the HTML content:\n```html\n{html_content}\n```",
+        },
+        {
+            "role": "user",
+            "content": f"Extraction prompt: {user_prompt}",
+        }
+    ]
 
-    Now, process the following HTML and return only the JSON:
+    # Add extra content if provided
+    if extra_content:
+        messages.append({
+            "role": "user",
+            "content": f"Additional context: {extra_content}",
+        })
 
-    ```html
-    {html_content}
-    ```
-    """
-
-    response = ollama.chat(model="llama3.2", messages=[{"role": "user", "content": full_prompt}])
+    response = ollama.chat(model="llama3.2", messages=messages)
 
     try:
-        json_object = json.loads(response["message"]["content"])  # Validate JSON
-        return JSONResponse(content=json_object)  # Return as JSON response
+        match = re.search(r"```(.*?)```", response["message"]["content"], re.DOTALL)
+        if match:
+         json_text = match.group(1).strip()  # Remove leading/trailing spaces
+         parsed_data = json.loads(json_text)
+         return JSONResponse(parsed_data)  # Return as JSON response
     except (json.JSONDecodeError, KeyError):
         return JSONResponse(content={"error": "Invalid response from Llama"}, status_code=500)
 
 @app.post("/extract")
 async def extract_json(request: Request):
-    """Receives HTML & Prompt from frontend and sends it to Llama"""
+    """Receives HTML, Prompt & Extra Context from frontend and sends it to Llama"""
     data = await request.json()
     html_content = data.get("html", "")
     user_prompt = data.get("prompt", "")
+    extra_content = data.get("extra_content", None)  # Optional additional context
 
-    return await get_llama_response(html_content, user_prompt)
+    return await get_llama_response(html_content, user_prompt, extra_content)
 
 if __name__ == "__main__":
     import uvicorn
