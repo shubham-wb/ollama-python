@@ -1,9 +1,13 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import JSONResponse
 import ollama
 import json
 import re
+
 app = FastAPI()
+
+# Define your secret API key
+API_KEY = "your-secret-key"
 
 async def get_llama_response(html_content, user_prompt, extra_content=None):
     """Ensures Llama returns only valid JSON"""
@@ -41,15 +45,23 @@ async def get_llama_response(html_content, user_prompt, extra_content=None):
     try:
         match = re.search(r"```(.*?)```", response["message"]["content"], re.DOTALL)
         if match:
-         json_text = match.group(1).strip()  # Remove leading/trailing spaces
-         parsed_data = json.loads(json_text)
-         return JSONResponse(parsed_data)  # Return as JSON response
+            json_text = match.group(1).strip()  # Remove leading/trailing spaces
+            parsed_data = json.loads(json_text)
+            return JSONResponse(parsed_data)  # Return as JSON response
     except (json.JSONDecodeError, KeyError):
         return JSONResponse(content={"error": "Invalid response from Llama"}, status_code=500)
 
 @app.post("/extract")
-async def extract_json(request: Request):
+async def extract_json(
+    request: Request, 
+    x_api_key: str = Header(None)
+):
     """Receives HTML, Prompt & Extra Context from frontend and sends it to Llama"""
+    
+    # Validate API Key
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+
     data = await request.json()
     html_content = data.get("html", "")
     user_prompt = data.get("prompt", "")
