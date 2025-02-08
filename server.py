@@ -10,7 +10,7 @@ app = FastAPI()
 API_KEY = "your-secret-key"
 
 async def get_llama_response(html_content, user_prompt, extra_content=None):
-    """Ensures Llama returns only valid JSON"""
+    """Ensures Llama returns only a valid JSON object"""
     
     messages = [
         {
@@ -23,33 +23,29 @@ async def get_llama_response(html_content, user_prompt, extra_content=None):
                 "Analyze the input carefully and extract data precisely based on the prompt."
             ),
         },
-        {
-            "role": "user",
-            "content": f"Here is the HTML content:\n```html\n{html_content}\n```",
-        },
-        {
-            "role": "user",
-            "content": f"Extraction prompt: {user_prompt}",
-        }
+        {"role": "user", "content": f"Here is the HTML content:\n```html\n{html_content}\n```"},
+        {"role": "user", "content": f"Extraction prompt: {user_prompt}"},
     ]
 
-    # Add extra content if provided
     if extra_content:
-        messages.append({
-            "role": "user",
-            "content": f"Additional context: {extra_content}",
-        })
+        messages.append({"role": "user", "content": f"Additional context: {extra_content}"})
 
     response = ollama.chat(model="llama3.2", messages=messages)
 
     try:
         match = re.search(r"```(.*?)```", response["message"]["content"], re.DOTALL)
         if match:
-            json_text = match.group(1).strip()  # Remove leading/trailing spaces
+            json_text = match.group(1).strip()
             parsed_data = json.loads(json_text)
-            return JSONResponse(parsed_data)  # Return as JSON response
+
+            # **Ensure the response is an object, not an array**
+            if isinstance(parsed_data, list) and parsed_data:
+                parsed_data = parsed_data[0]  # Extract the first object from the array
+
+            return JSONResponse(parsed_data)  
     except (json.JSONDecodeError, KeyError):
         return JSONResponse(content={"error": "Invalid response from Llama"}, status_code=500)
+
 
 @app.post("/extract")
 async def extract_json(
